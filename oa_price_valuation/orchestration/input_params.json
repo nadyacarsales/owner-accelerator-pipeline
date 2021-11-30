@@ -1,0 +1,8 @@
+{
+  "S3Bucket": "dcp-prod-owner-accelerator",
+  "S3SourceDataOutputKey": "pricing_data_to_process", 
+  "S3PricingApiDataOutputKey": "pricing_processed",
+  "S3AggregatedDataPath": "pricing_merged",
+  "S3OutputFileName": "pricing_data_merged.csv", 
+  "IsIncremental": false
+}

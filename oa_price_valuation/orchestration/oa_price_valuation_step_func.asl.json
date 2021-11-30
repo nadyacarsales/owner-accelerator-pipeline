@@ -1,0 +1,253 @@
+{
+  "Comment": "Owner Accelerator Price valuation pipeline",
+  "StartAt": "Clean up folders",
+  "TimeoutSeconds": 8200,
+  "States": {
+    "Clean up folders": {
+      "Type": "Task",
+      "Next": "Generate source data for processing",
+      "Parameters": {
+        "Bucket.$": "$.S3Bucket",
+        "Delete": {
+          "Objects": [
+            {
+              "Key.$": "$.S3SourceDataOutputKey"
+            }
+          ]
+        }
+      },
+      "ResultPath": null,
+      "Resource": "arn:aws:states:::aws-sdk:s3:deleteObjects"
+    },
+    "Generate source data for processing": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "owner-accelerator-init-processing-data",
+        "Payload": {
+          "S3Bucket.$": "$.S3Bucket",
+          "S3OutputKey.$": "$.S3SourceDataOutputKey",
+          "IsIncremental.$": "$.IsIncremental",
+          "S3PricingApiDataOutputKey.$": "$.S3PricingApiDataOutputKey",
+          "S3AggregatedDataPath.$": "$.S3AggregatedDataPath",
+          "S3OutputFileName.$": "$.S3OutputFileName"
+        }
+      },
+      "Retry": [
+                {
+                    "ErrorEquals": ["States.ALL"],
+                    "IntervalSeconds": 30,
+                    "MaxAttempts": 2,
+                    "BackoffRate": 2.0
+                }
+            ],
+      "Next": "Check if data generated"
+    },
+    "Check if data generated": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Not": {
+            "Variable": "$.Payload.success",
+            "BooleanEquals": true
+          },
+          "Next": "Handle Errors"
+        }
+      ],
+      "Default": "Process data in parallel",
+      "OutputPath": "$.Payload"
+    },
+    "Process data in parallel": {
+      "Type": "Parallel",
+      "Parameters": {
+        "S3Bucket.$": "$.body.bucket",
+        "S3FilePath.$": "$.body.full_s3_path",
+        "S3OutputKey": "pricing_processed"
+      },
+      "Branches": [
+        {
+          "StartAt": "LiveMarket",
+          "States": {
+            "LiveMarket": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::batch:submitJob.sync",
+              "ResultPath": "$.taskresult.jobDefinition.jobBatchInfo",
+              "Parameters": {
+                "JobDefinition": "arn:aws:batch:ap-southeast-2:555050780997:job-definition/owner-accelerator-populate-pricing-from-api:2",
+                "JobName": "PopulatePriceDataWithLiveMarketApi",
+                "JobQueue": "arn:aws:batch:ap-southeast-2:555050780997:job-queue/spot-queue",
+                "Parameters.$": "$",
+                "ContainerOverrides": {
+                  "Command": [
+                    "main.py",
+                    "--S3FileKey",
+                    "Ref::S3FilePath",
+                    "--Service",
+                    "livemarket"
+                  ],
+                  "Environment": [
+                    {
+                      "Name": "S3_OUTPUT_BUCKET",
+                      "Value.$": "$.S3Bucket"
+                    },
+                    {
+                      "Name": "S3_OUTPUT_PATH_KEY",
+                      "Value.$": "$.S3OutputKey"
+                    },
+                    {
+                      "Name": "S3_PATH_KEY",
+                      "Value.$": "$.S3FilePath"
+                    }
+                  ]
+                }
+              },
+              "TimeoutSeconds": 8000,
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "Redbook",
+          "States": {
+            "Redbook": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::batch:submitJob.sync",
+              "ResultPath": "$.taskresult.jobDefinition.jobBatchInfo",
+              "Parameters": {
+                "JobDefinition": "arn:aws:batch:ap-southeast-2:555050780997:job-definition/owner-accelerator-populate-pricing-from-api:2",
+                "JobName": "PopulatePriceDataWithRedbookApi",
+                "JobQueue": "arn:aws:batch:ap-southeast-2:555050780997:job-queue/spot-queue",
+                "Parameters.$": "$",
+                "ContainerOverrides": {
+                  "Command": [
+                    "main.py",
+                    "--S3FileKey",
+                    "Ref::S3FilePath",
+                    "--Service",
+                    "redbook"
+                  ],
+                  "Environment": [
+                    {
+                      "Name": "S3_OUTPUT_BUCKET",
+                      "Value.$": "$.S3Bucket"
+                    },
+                    {
+                      "Name": "S3_OUTPUT_PATH_KEY",
+                      "Value.$": "$.S3OutputKey"
+                    },
+                    {
+                      "Name": "S3_PATH_KEY",
+                      "Value.$": "$.S3FilePath"
+                    }
+                  ]
+                }
+              },
+              "TimeoutSeconds": 8000,
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "InstantOffer",
+          "States": {
+            "InstantOffer": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::batch:submitJob.sync",
+              "ResultPath": "$.taskresult.jobDefinition.jobBatchInfo",
+              "Parameters": {
+                "JobDefinition": "arn:aws:batch:ap-southeast-2:555050780997:job-definition/owner-accelerator-populate-pricing-from-api:2",
+                "JobName": "PopulatePriceDataWithInstantOfferApi",
+                "JobQueue": "arn:aws:batch:ap-southeast-2:555050780997:job-queue/spot-queue",
+                "Parameters.$": "$",
+                "ContainerOverrides": {
+                  "Command": [
+                    "main.py",
+                    "--S3FileKey",
+                    "Ref::S3FilePath",
+                    "--Service",
+                    "instantoffer"
+                  ],
+                  "Environment": [
+                    {
+                      "Name": "S3_OUTPUT_BUCKET",
+                      "Value.$": "$.S3Bucket"
+                    },
+                    {
+                      "Name": "S3_OUTPUT_PATH_KEY",
+                      "Value.$": "$.S3OutputKey"
+                    },
+                    {
+                      "Name": "S3_PATH_KEY",
+                      "Value.$": "$.S3FilePath"
+                    }
+                  ]
+                }
+              },
+              "TimeoutSeconds": 8000,
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "PriceAhead",
+          "States": {
+            "PriceAhead": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::batch:submitJob.sync",
+              "ResultPath": "$.taskresult.jobDefinition.jobBatchInfo",
+              "Parameters": {
+                "JobDefinition": "arn:aws:batch:ap-southeast-2:555050780997:job-definition/owner-accelerator-populate-pricing-from-api:2",
+                "JobName": "PopulatePriceDataWithPriceAheadApi",
+                "JobQueue": "arn:aws:batch:ap-southeast-2:555050780997:job-queue/spot-queue",
+                "Parameters.$": "$",
+                "ContainerOverrides": {
+                  "Command": [
+                    "main.py",
+                    "--S3FileKey",
+                    "Ref::S3FilePath",
+                    "--Service",
+                    "priceahead"
+                  ],
+                  "Environment": [
+                    {
+                      "Name": "S3_OUTPUT_BUCKET",
+                      "Value.$": "$.S3Bucket"
+                    },
+                    {
+                      "Name": "S3_OUTPUT_PATH_KEY",
+                      "Value.$": "$.S3OutputKey"
+                    },
+                    {
+                      "Name": "S3_PATH_KEY",
+                      "Value.$": "$.S3FilePath"
+                    }
+                  ]
+                }
+              },
+              "TimeoutSeconds": 8000,
+              "End": true
+            }
+          }
+        }
+      ],
+      "Next": "Combine results"
+    },
+    "Combine results": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "owner-accelerator-merge-pricing-data",
+        "Payload": {
+          "S3Bucket.$": "$.[0].S3Bucket",
+          "S3SourcePath.$": "$.[0].S3OutputKey",
+          "S3OutputPathKey.$": "$$.Execution.Input.S3AggregatedDataPath",
+          "S3OutputFileName.$": "$$.Execution.Input.S3OutputFileName"
+        }
+      },
+      "End": true
+    },
+    "Handle Errors": {
+      "Type": "Fail"
+    }
+  }
+}
